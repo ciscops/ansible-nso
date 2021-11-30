@@ -191,40 +191,48 @@ class NsoConfig(object):
         (3, 4, 12)
     ]
 
-    def __init__(self, check_mode, client, data, commit_flags):
+    def __init__(self, check_mode, client, data, commit_flags, load, load_path, load_format, load_mode):
         self._check_mode = check_mode
         self._client = client
         self._data = data
         self._commit_flags = commit_flags
+        self._load = load
+        self._load_path, self._load_format, self._load_mode = load_path, load_format, load_mode
 
         self._changes = []
         self._diffs = []
         self._commit_result = []
 
     def main(self):
-        # build list of values from configured data
-        value_builder = ValueBuilder(self._client)
-        for key, value in self._data.items():
-            value_builder.build('', key, value)
+        if not self._load:
+            # build list of values from configured data
+            value_builder = ValueBuilder(self._client)
+            for key, value in self._data.items():
+                value_builder.build('', key, value)
 
-        self._data_write(value_builder.values)
+            self._data_write(value_builder.values)
 
-        # check sync AFTER configuration is written
-        sync_values = self._sync_check(value_builder.values)
-        self._sync_ensure(sync_values)
+            # check sync AFTER configuration is written
+            sync_values = self._sync_check(value_builder.values)
+            self._sync_ensure(sync_values)
+        else:
+            self._data_write(self._data)
 
         return self._changes, self._diffs, self._commit_result
 
     def _data_write(self, values):
         th = self._client.get_trans(mode='read_write')
 
-        for value in values:
-            if value.state == State.SET:
-                self._client.set_value(th, value.path, value.value)
-            elif value.state == State.PRESENT:
-                self._client.create(th, value.path)
-            elif value.state == State.ABSENT:
-                self._client.delete(th, value.path)
+        if not self._load:
+            for value in values:
+                if value.state == State.SET:
+                    self._client.set_value(th, value.path, value.value)
+                elif value.state == State.PRESENT:
+                    self._client.create(th, value.path)
+                elif value.state == State.ABSENT:
+                    self._client.delete(th, value.path)
+        else:
+            self._client.load(th, self._load_path, values, format=self._load_format, mode=self._load_mode)
 
         changes = self._client.get_trans_changes(th)
         for change in changes:
@@ -280,7 +288,7 @@ class NsoConfig(object):
                 resp = self._client.run_action(None, action_path, action_params)
                 if len(resp) > 0:
                     sync_values.append(
-                        ValueBuilder.Value(value.path, value.state, resp[0]['value']))
+                        ValueBuilder.Value(value.path, value.state, resp[0]['value'], []))
 
         return sync_values
 
@@ -304,7 +312,11 @@ class NsoConfig(object):
 def main():
     argument_spec = dict(
         data=dict(required=True, type='dict'),
-        commit_flags=dict(required=False, type='list', elements='str')
+        commit_flags=dict(required=False, type='list', elements='str'),
+        load=dict(required=False, type='bool', default=False),
+        load_path=dict(required=False, type='str', default='/'),
+        load_format=dict(required=False, type='str', choices=['json', 'xml'], default='json'),
+        load_mode=dict(required=False, type='str', choices=['create', 'merge', 'replace'], default='merge')
     )
 
     argument_spec.update(nso_argument_spec)
@@ -315,7 +327,8 @@ def main():
     )
     p = module.params
     client = connect(p)
-    nso_config = NsoConfig(module.check_mode, client, p['data'], p['commit_flags'])
+    nso_config = NsoConfig(module.check_mode, client, p['data'], p['commit_flags'],
+                           p['load'], p['load_path'], p['load_format'], p['load_mode'])
     try:
         verify_version(client, NsoConfig.REQUIRED_VERSIONS)
 

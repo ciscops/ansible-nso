@@ -122,9 +122,9 @@ class JsonRpc(object):
 
     def commit(self, th, flags=None):
         if flags:
-            payload = {'method': 'commit', 'params': {'th': th, 'flags': flags}}
+            payload = {'method': 'commit', 'params': {'th': th, 'rollback-id': True, 'flags': flags}}
         else:
-            payload = {'method': 'commit', 'params': {'th': th}}
+            payload = {'method': 'commit', 'params': {'th': th, 'rollback-id': True}}
         resp, resp_json = self._write_call(payload)
         if len(resp_json['result']) == 0:
             self._maybe_delete_trans(th)
@@ -172,6 +172,66 @@ class JsonRpc(object):
     def delete(self, th, path):
         payload = {'method': 'delete', 'params': {'th': th, 'path': path}}
         self._write_call(payload)
+
+    def load(self, th, path, data, format=None, mode=None):
+        if format is None:
+            format = 'json'
+        if mode is None:
+            mode = 'merge'
+        payload = {
+            'method': 'load',
+            'params': {
+                'th': th, 'path': path, 'format': format, 'mode': mode, 'data': data
+            }
+        }
+        self._write_call(payload)
+
+    def get_rollbacks(self):
+        payload = {
+            'method': 'get_rollbacks'
+        }
+        resp, resp_json = self._call(payload)
+        return resp_json['result']
+
+    def get_rollback(self, nr):
+        # nr is 0-based, counting backwards from most recent commit
+        payload = {
+            'method': 'get_rollback',
+            'params': {
+                'nr': nr
+            }
+        }
+        resp, resp_json = self._call(payload)
+        return resp_json['result']
+
+    def install_rollback(self, nr):
+        # nr is 0-based, counting backwards from most recent commit
+        payload = {
+            'method': 'install_rollback',
+            'params': {
+                'nr': nr
+            }
+        }
+        resp, resp_json = self._call(payload)
+        return resp_json['result']
+
+    def load_rollback(self, th, nr, path=None, selective=False):
+        # nr is 0-based, counting backwards from most recent commit
+        # Supplying "path" will restrict the rollback to a subtree
+        # "selective" indicates whether to apply all rollbacks 0 - nr (False) or just nr (True)
+        params = {
+            'th': th,
+            'nr': nr,
+            'selective': selective
+        }
+        if path is not None:
+            params.update({"path": path})
+        payload = {
+            'method': 'load_rollback',
+            'params': params
+        }
+        resp, resp_json = self._call(payload)
+        return resp_json['result']
 
     def set_value(self, th, path, value):
         payload = {
